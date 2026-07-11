@@ -1,0 +1,270 @@
+import serial
+import serial.tools.list_ports
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+import datetime
+import collections
+import csv
+import os
+import sys
+
+try:
+    import winsound
+except ImportError:
+    winsound = None
+
+
+class EvrenselTelemetri:
+    """
+    Akıllı Pediatrik Telemetri Sistemi için seri porttan veri okuyan,
+    karanlık temalı canlı grafik arayüzü.
+    """
+
+    def __init__(self):
+        self.BAUD_RATE = 9600
+        self.CRITICAL_TEMP = 38.0
+        self.ALERT_COOLDOWN = 60
+
+        self.history_size = 30
+        self.y_data = collections.deque(maxlen=self.history_size)
+        self.x_data = collections.deque(maxlen=self.history_size)
+
+        self.last_alert_time = datetime.datetime.now() - datetime.timedelta(
+            seconds=self.ALERT_COOLDOWN
+        )
+
+        self.csv_filename = f"Prototip_Kayit_{datetime.datetime.now().strftime('%Y%m%d')}.csv"
+
+        self._init_csv()
+        self.ser = self._auto_connect_serial()
+        self._init_ui()
+
+    def _init_csv(self):
+        """Sensör verilerini yedeklemek için CSV dosyası oluşturur."""
+        if not os.path.exists(self.csv_filename):
+            try:
+                with open(self.csv_filename, mode="w", newline="", encoding="utf-8") as f:
+                    csv.writer(f).writerow(["Zaman", "T_Core"])
+            except Exception:
+                pass
+
+    def _auto_connect_serial(self):
+        """Bilgisayardaki seri portları tarar ve uygun cihazı otomatik bulmaya çalışır."""
+        print("Sistem takili cihazlari tariyor...")
+
+        ports = serial.tools.list_ports.comports()
+        hedef_port = None
+
+        for port in ports:
+            description = port.description or ""
+
+            if (
+                "USB" in description
+                or "CH340" in description
+                or "Arduino" in description
+                or "CP210" in description
+                or "ESP" in description
+            ):
+                hedef_port = port.device
+                break
+
+        if not hedef_port and ports:
+            hedef_port = ports[0].device
+
+        if hedef_port:
+            try:
+                ser = serial.Serial(hedef_port, self.BAUD_RATE, timeout=1)
+                ser.reset_input_buffer()
+
+                print(f"BAŞARILI: Cihaz {hedef_port} portunda bulundu ve baglanildi!")
+                return ser
+
+            except Exception:
+                print(
+                    f"HATA: {hedef_port} bulundu ama baglanilamadi. "
+                    "Arduino IDE veya baska bir program portu kullaniyor olabilir."
+                )
+                return None
+
+        print("KRITIK HATA: Bilgisayara takili hicbir cihaz bulunamadi.")
+        return None
+
+    def _init_ui(self):
+        """Karanlık mod canlı telemetri ekranını başlatır."""
+        plt.style.use("dark_background")
+
+        self.fig, self.ax = plt.subplots(figsize=(12, 6), facecolor="#0d1117")
+        self.ax.set_facecolor("#0d1117")
+
+        try:
+            self.fig.canvas.manager.set_window_title(
+                "Akıllı Pantolon Telemetri Test Ekranı"
+            )
+        except Exception:
+            pass
+
+        self.line, = self.ax.plot(
+            [],
+            [],
+            color="#00ffcc",
+            marker="o",
+            linewidth=2.5,
+            markersize=6,
+            markerfacecolor="#ffffff",
+        )
+
+        self.ax.axhline(
+            y=self.CRITICAL_TEMP,
+            color="#ff4b4b",
+            linestyle="--",
+            linewidth=2,
+            alpha=0.8,
+            label="Ateş Sınırı",
+        )
+
+        hud_style = dict(
+            boxstyle="round,pad=1",
+            facecolor="#161b22",
+            edgecolor="#30363d",
+            alpha=0.9,
+        )
+
+        self.hud_box = self.ax.text(
+            0.98,
+            0.05,
+            "VERI BEKLENIYOR...",
+            transform=self.ax.transAxes,
+            fontsize=14,
+            color="#c9d1d9",
+            family="monospace",
+            horizontalalignment="right",
+            verticalalignment="bottom",
+            bbox=hud_style,
+        )
+
+        self.ax.set_ylim(30, 42)
+        self.ax.set_title(
+            "PROTOTİP CANLI İZLEME EKRANI",
+            fontsize=16,
+            fontweight="bold",
+            color="#ffffff",
+            pad=15,
+        )
+
+        self.ax.set_ylabel("Sıcaklık (°C)")
+        self.ax.set_xlabel("Zaman")
+
+        self.ax.spines["top"].set_visible(False)
+        self.ax.spines["right"].set_visible(False)
+
+        plt.grid(True, color="#30363d", linestyle="-", alpha=0.5)
+        plt.subplots_adjust(bottom=0.25)
+
+    def _play_alert(self):
+        """Kritik sıcaklık durumunda uyarı sesi verir."""
+        if winsound:
+            try:
+                winsound.Beep(2000, 500)
+            except Exception:
+                pass
+        else:
+            print("\a")
+
+    def process_data_frame(self, frame):
+        """Arduino'dan gelen ham veriyi ayıklar ve grafiğe aktarır."""
+        if self.ser and self.ser.in_waiting > 0:
+            try:
+                line_data = self.ser.readline().decode(
+                    "utf-8",
+                    errors="ignore"
+                ).strip()
+
+                if "Tahmini_T_Core:" in line_data:
+                    raw_str = line_data.split(":")[-1]
+                    core_temp = float(raw_str)
+
+                    if core_temp < 25.0:
+                        self.hud_box.set_text(
+                            "DURUM: SENSOR PARMAKTAN CEKILDI\nBEKLEMEDE..."
+                        )
+                        return self.line, self.hud_box
+
+                    now = datetime.datetime.now()
+                    now_str = now.strftime("%H:%M:%S")
+
+                    try:
+                        with open(
+                            self.csv_filename,
+                            mode="a",
+                            newline="",
+                            encoding="utf-8",
+                        ) as f:
+                            csv.writer(f).writerow([now_str, core_temp])
+                    except Exception:
+                        pass
+
+                    if (
+                        core_temp >= self.CRITICAL_TEMP
+                        and (now - self.last_alert_time).seconds > self.ALERT_COOLDOWN
+                    ):
+                        self._play_alert()
+                        self.last_alert_time = now
+
+                    self.y_data.append(core_temp)
+                    self.x_data.append(now_str)
+
+                    self.line.set_data(range(len(self.x_data)), self.y_data)
+
+                    self.ax.set_xticks(range(len(self.x_data)))
+                    self.ax.set_xticklabels(
+                        list(self.x_data),
+                        rotation=45,
+                        fontsize=10,
+                        color="#8b949e",
+                    )
+
+                    self.ax.set_xlim(
+                        max(0, len(self.x_data) - self.history_size),
+                        len(self.x_data),
+                    )
+
+                    hud_text = (
+                        f"SAAT    : {now_str}\n"
+                        f"T_CORE  : {core_temp:.2f} °C\n"
+                        f"DURUM   : VERI AKISI NORMAL"
+                    )
+
+                    if core_temp >= self.CRITICAL_TEMP:
+                        hud_text += "\nUYARI   : YUKSEK ATES"
+
+                    self.hud_box.set_text(hud_text)
+
+            except Exception:
+                pass
+
+        return self.line, self.hud_box
+
+    def run(self):
+        if not self.ser:
+            print("Cihaz bulunamadigi icin grafik baslatilamiyor.")
+            sys.exit()
+
+        print("Arayuz basariyla baslatildi. Cihazdan veri akiyor...")
+
+        self.anim = FuncAnimation(
+            self.fig,
+            self.process_data_frame,
+            interval=1000,
+            blit=False,
+            cache_frame_data=False,
+        )
+
+        plt.show()
+
+        if self.ser and self.ser.is_open:
+            self.ser.close()
+
+
+if __name__ == "__main__":
+    app = EvrenselTelemetri()
+    app.run()

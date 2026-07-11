@@ -1,0 +1,70 @@
+Kurulum ve Kullanım
+1. Sistemi Başlatma
+
+Cihazın üzerindeki anahtarı açık konuma getirin. Ekran aydınlanacak ve anlık sıcaklık ölçümü başlayacaktır.
+
+2. Ekranı Okuma
+
+Ortadaki OLED ekran, vücut sıcaklığını anlık olarak santigrat derece cinsinden gösterir.
+
+3. Alarm Durumu
+
+Sıcaklık kritik seviyeye ulaştığında sistem kullanıcıyı uyarır:
+
+Ekranda yüksek sıcaklık uyarısı görüntülenir.
+Kırmızı uyarı ışığı yanar.
+Python arayüzünde kritik sıcaklık seviyesi grafik üzerinde izlenebilir.
+4. Cihazı Kapatma
+
+Kullanım tamamlandığında anahtarı kapalı konuma getirerek cihazı kapatın.
+
+Arduino Kurulumu
+Arduino IDE uygulamasını açın.
+ESP32-C3 kartınızı USB kablosu ile bilgisayara bağlayın.
+Gerekli kütüphaneleri Arduino Library Manager üzerinden yükleyin:
+Adafruit MLX90614
+Adafruit GFX
+Adafruit SH110X
+donanim_kodlari/telemetri_esp32_c3.ino dosyasını açın.
+Kart ve port ayarlarını seçin.
+Kodu karta yükleyin.
+Python Arayüz Kurulumu
+
+Python arayüzü, seri port üzerinden gelen sıcaklık verilerini canlı grafik olarak gösterir.
+
+Shell
+cd python_arayuz
+
+pip install -r requirements.txt
+
+python telemetri.py
+
+Daha fazla satır göster
+
+Program çalıştırıldığında uygun seri port otomatik olarak bulunmaya çalışılır. Arduino bilgisayara takılıyken Python dosyası çalıştırıldığında grafik ekranı açılır.
+
+Seri Veri Formatı
+
+Arduino tarafı Python arayüzüne aşağıdaki formatta veri gönderir:
+
+Plain Text
+Tahmini_T_Core:36.70
+
+Daha fazla satır göster
+
+Python arayüzü bu satırı okuyarak sıcaklık değerini grafiğe aktarır.
+
+Fikri Mülkiyet Notu
+
+Bu repoda paylaşılan Arduino kodu, projenin açık kaynak demo sürümüdür. Özel kalibrasyon, revize offset ve filtreleme algoritmaları ticari ve akademik fikri mülkiyetin korunması amacıyla sadeleştirilmiştir.
+
+Lisans
+
+Bu proje portfolyo ve akademik görünürlük amacıyla paylaşılmıştır. Ticari kullanım için proje sahibinden yazılı izin alınmalıdır.
+
+Geliştirici
+
+Emir Doğu Erkan
+ Mühendislik öğrencisi / donanım ve yazılım geliştirici
+
+--- ## `LICENSE` önerisi Ticari kopyalamayı sınırlamak istiyorsan klasik MIT yerine şu tarz kısa bir özel lisans metni daha uygun olur: ```txt Copyright (c) 2026 Emir Doğu Erkan All rights reserved. This repository is shared for educational, academic portfolio, and demonstration purposes only. Permission is granted to view, study, and reference the source code for non-commercial and academic purposes. Commercial use, redistribution, resale, production, sublicensing, or integration into a commercial product is not permitted without prior written permission from the copyright holder. The hardware design, calibration logic, filtering approach, and telemetry workflow may include protected intellectual property. Simplified demo code is provided in this repository and does not represent the full proprietary implementation. This project is a prototype and is not intended for medical diagnosis, treatment, or clinical decision-making.

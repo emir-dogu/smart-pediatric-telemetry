@@ -1,0 +1,205 @@
+/**
+ * @file    telemetri_esp32_c3.ino
+ * @brief   Akıllı Pediatrik Telemetri Sistemi - Açık Kaynak Demo Sürümü
+ *
+ * Bu dosya, ESP32-C3 + MLX90614 + SH110X OLED tabanlı
+ * temassız sıcaklık izleme prototipi için sadeleştirilmiş
+ * GitHub paylaşım sürümüdür.
+ *
+ * Not:
+ * Fikri mülkiyet koruması amacıyla özel offset ve filtreleme
+ * algoritmaları bu açık kaynak sürümde basitleştirilmiştir.
+ */
+
+#include <Wire.h>
+#include <Adafruit_MLX90614.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define EKRAN_ADRESI 0x3C
+
+// Bağlantınıza göre değiştirin.
+#define ALARM_LED_PIN 8
+
+Adafruit_SH1106G display = Adafruit_SH1106G(
+  SCREEN_WIDTH,
+  SCREEN_HEIGHT,
+  &Wire,
+  OLED_RESET
+);
+
+Adafruit_MLX90614 mlx = Adafruit_MLX90614();
+
+const long VERI_PERIYODU = 1000;
+unsigned long onceki_zaman = 0;
+
+const float KRITIK_ATES_ESIGI = 38.0;
+const float BASIT_OFFSET = 4.0;
+
+bool heartbeat_state = false;
+
+float hesaplaTahminiVucutIsisi(float yuzey_sicakligi, float ortam_sicakligi) {
+  /*
+   * Açık kaynak demo hesaplama:
+   * Bu bölüm, gerçek projedeki özel kalibrasyon ve filtreleme
+   * algoritmalarının yerine basitleştirilmiş bir gösterimdir.
+   */
+  float tahmini_deger = yuzey_sicakligi + BASIT_OFFSET;
+
+  // Temel güvenlik sınırlandırması
+  if (tahmini_deger < 0.0) {
+    tahmini_deger = 0.0;
+  }
+
+  if (tahmini_deger > 45.0) {
+    tahmini_deger = 45.0;
+  }
+
+  return tahmini_deger;
+}
+
+void baslangicEkrani() {
+  display.clearDisplay();
+  display.setTextColor(SH110X_WHITE);
+
+  display.drawRoundRect(5, 5, 118, 54, 8, SH110X_WHITE);
+
+  display.setTextSize(1);
+  display.setCursor(20, 20);
+  display.println(F("AKILLI PANTOLON"));
+
+  display.setCursor(28, 35);
+  display.println(F("SISTEM AKTIF"));
+
+  display.display();
+  delay(2000);
+}
+
+void sensorHataEkrani() {
+  Serial.println(F("Tahmini_T_Core:0.00"));
+
+  digitalWrite(ALARM_LED_PIN, LOW);
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(20, 30);
+  display.println(F("SENSOR HATA!"));
+  display.display();
+}
+
+void telemetriEkrani(float tahmini_ates, float ortam_sicakligi) {
+  display.clearDisplay();
+
+  display.drawLine(0, 10, 128, 10, SH110X_WHITE);
+
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print(F("TELEMETRI"));
+
+  heartbeat_state = !heartbeat_state;
+
+  if (heartbeat_state) {
+    display.fillCircle(120, 4, 3, SH110X_WHITE);
+  } else {
+    display.drawCircle(120, 4, 3, SH110X_WHITE);
+  }
+
+  display.setCursor(0, 15);
+  display.println(F("VUCUT ISISI"));
+
+  display.setTextSize(3);
+  display.setCursor(0, 27);
+  display.print(tahmini_ates, 1);
+
+  display.setTextSize(1);
+  display.print(F(" C"));
+
+  display.setCursor(0, 56);
+  display.print(F("Ortam: "));
+  display.print(ortam_sicakligi, 1);
+  display.println(F(" C"));
+
+  // Basit seviye göstergesi
+  int seviye = 0;
+
+  if (tahmini_ates >= 34.0) seviye = 1;
+  if (tahmini_ates >= 35.0) seviye = 2;
+  if (tahmini_ates >= 36.0) seviye = 3;
+  if (tahmini_ates >= 36.5) seviye = 4;
+
+  display.drawTriangle(110, 15, 95, 52, 125, 52, SH110X_WHITE);
+  display.drawLine(106, 27, 114, 27, SH110X_WHITE);
+  display.drawLine(100, 40, 120, 40, SH110X_WHITE);
+
+  if (seviye > 0) {
+    display.fillTriangle(110, 15, 95, 52, 125, 52, SH110X_WHITE);
+
+    int mask_h = (4 - seviye) * 9;
+
+    if (mask_h > 0) {
+      display.fillRect(90, 15, 40, mask_h, SH110X_BLACK);
+      display.drawTriangle(110, 15, 95, 52, 125, 52, SH110X_WHITE);
+      display.drawLine(106, 27, 114, 27, SH110X_WHITE);
+      display.drawLine(100, 40, 120, 40, SH110X_WHITE);
+    }
+  }
+
+  if (tahmini_ates >= KRITIK_ATES_ESIGI) {
+    digitalWrite(ALARM_LED_PIN, HIGH);
+
+    display.setTextSize(1);
+    display.setCursor(64, 56);
+    display.print(F("ALARM"));
+  } else {
+    digitalWrite(ALARM_LED_PIN, LOW);
+  }
+
+  display.display();
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  Wire.begin();
+  Wire.setClock(100000);
+
+  pinMode(ALARM_LED_PIN, OUTPUT);
+  digitalWrite(ALARM_LED_PIN, LOW);
+
+  if (!display.begin(EKRAN_ADRESI, true)) {
+    Serial.println(F("HATA: OLED Bulunamadi!"));
+    while (1);
+  }
+
+  if (!mlx.begin()) {
+    Serial.println(F("HATA: MLX90614 Bulunamadi!"));
+    while (1);
+  }
+
+  baslangicEkrani();
+}
+
+void loop() {
+  unsigned long su_an = millis();
+
+  if (su_an - onceki_zaman >= VERI_PERIYODU) {
+    onceki_zaman = su_an;
+
+    float t_yuzey = mlx.readObjectTempC();
+    float t_ortam = mlx.readAmbientTempC();
+
+    if (!isnan(t_yuzey) && !isnan(t_ortam) && t_yuzey > 10.0 && t_yuzey < 50.0) {
+      float tahmini_ates = hesaplaTahminiVucutIsisi(t_yuzey, t_ortam);
+
+      Serial.print(F("Tahmini_T_Core:"));
+      Serial.println(tahmini_ates, 2);
+
+      telemetriEkrani(tahmini_ates, t_ortam);
+    } else {
+      sensorHataEkrani();
+    }
+  }
+}
